@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  html, body { margin: 0; height: 100%; background: #02060d; overflow: hidden; }
+  #g { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+  #err { position: absolute; left: 16px; right: 16px; top: 40%; color: #edE7d9; font: 16px sans-serif; text-align: center; display: none; }
+</style>
+</head>
+<body>
+<div id="g"></div>
+<div id="err">Il globo 3D richiede WebGL, che non è disponibile su questo dispositivo.</div>
+<script src="globe.gl.min.js"></script>
+<script>
+(function () {
+  var globe = null, flights = [], idleTimer = null;
+  var ORANGE = '#ff7a3d', AMBER = '#ffc400', PAPER = '#f3eee3';
+
+  function showError() { document.getElementById('err').style.display = 'block'; }
+
+  function arcsOf() { return flights.filter(function (f) { return !(f.track && f.track.length > 2); }); }
+  function pathsOf() {
+    return flights.filter(function (f) { return f.track && f.track.length > 2; }).map(function (f) {
+      var n = f.track.length;
+      var pts = [[f.depLat, f.depLng, 0.01]];
+      for (var i = 0; i < n; i++) {
+        pts.push([f.track[i][0], f.track[i][1], 0.012 + 0.05 * Math.sin(Math.PI * i / Math.max(1, n - 1))]);
+      }
+      pts.push([f.arrLat, f.arrLng, 0.01]);
+      return { id: f.id, pts: pts };
+    });
+  }
+  function airportsOf() {
+    var m = {};
+    flights.forEach(function (f) {
+      m[f.dep] = { code: f.dep, lat: f.depLat, lng: f.depLng };
+      m[f.arr] = { code: f.arr, lat: f.arrLat, lng: f.arrLng };
+    });
+    return Object.keys(m).map(function (k) { return m[k]; });
+  }
+
+  function fit(focusId) {
+    var list = flights;
+    if (focusId != null) {
+      var one = flights.filter(function (f) { return String(f.id) === String(focusId); });
+      if (one.length) list = one;
+    }
+    if (!list.length) { globe.pointOfView({ lat: 25, lng: 10, altitude: 2.6 }, 800); return; }
+    var x = 0, y = 0, z = 0, vs = [];
+    list.forEach(function (f) {
+      [[f.depLat, f.depLng], [f.arrLat, f.arrLng]].forEach(function (p) {
+        var la = p[0] * Math.PI / 180, lo = p[1] * Math.PI / 180;
+        var v = [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)];
+        vs.push(v); x += v[0]; y += v[1]; z += v[2];
+      });
+    });
+    var len = Math.sqrt(x * x + y * y + z * z);
+    if (len < 1e-6) { globe.pointOfView({ lat: 25, lng: 10, altitude: 2.6 }, 800); return; }
+    x /= len; y /= len; z /= len;
+    var maxAng = 0;
+    vs.forEach(function (v) {
+      var d = Math.max(-1, Math.min(1, v[0] * x + v[1] * y + v[2] * z));
+      maxAng = Math.max(maxAng, Math.acos(d));
+    });
+    var lat = Math.asin(z) * 180 / Math.PI, lng = Math.atan2(y, x) * 180 / Math.PI;
+    var alt = Math.max(0.55, Math.min(3.2, 0.5 + maxAng * 1.9));
+    globe.pointOfView({ lat: lat, lng: lng, altitude: alt }, 1400);
+  }
+
+  function openFlight(d) {
+    try { if (window.AndroidBridge && d && d.id != null) AndroidBridge.openFlight(String(d.id)); } catch (e) {}
+  }
+
+  function init() {
+    try {
+      var el = document.getElementById('g');
+      globe = Globe()(el)
+        .width(window.innerWidth).height(window.innerHeight)
+        .globeImageUrl('earth.jpg')
+        .bumpImageUrl('topology.jpg')
+        .backgroundImageUrl('sky.jpg')
+        .atmosphereColor('#8ec5ff').atmosphereAltitude(0.2)
+        .arcStartLat('depLat').arcStartLng('depLng').arcEndLat('arrLat').arcEndLng('arrLng')
+        .arcColor(function (d) { return d.kind === 'future' ? [AMBER, ORANGE] : [PAPER, ORANGE]; })
+        .arcStroke(0.55).arcAltitudeAutoScale(0.4)
+        .arcDashLength(0.5).arcDashGap(0.12).arcDashAnimateTime(5000)
+        .arcLabel(function (d) { return d.dep + ' → ' + d.arr; })
+        .onArcClick(openFlight)
+        .pathPoints('pts').pathPointLat(function (p) { return p[0]; }).pathPointLng(function (p) { return p[1]; })
+        .pathPointAlt(function (p) { return p[2]; })
+        .pathColor(function () { return [PAPER, ORANGE]; }).pathStroke(1.1).pathTransitionDuration(0)
+        .onPathClick(openFlight)
+        .pointLat('lat').pointLng('lng').pointAltitude(0.012).pointRadius(0.28).pointColor(function () { return AMBER; })
+        .labelLat('lat').labelLng('lng').labelText('code').labelSize(0.85).labelDotRadius(0.0)
+        .labelAltitude(0.02).labelColor(function () { return '#ffffff'; }).labelResolution(2);
+
+      var c = globe.controls();
+      c.autoRotate = true; c.autoRotateSpeed = 0.35;
+      c.enableDamping = true; c.dampingFactor = 0.08;
+      c.minDistance = 115; c.maxDistance = 620; c.zoomSpeed = 0.9; c.rotateSpeed = 0.6;
+      c.addEventListener('start', function () { c.autoRotate = false; if (idleTimer) clearTimeout(idleTimer); });
+      c.addEventListener('end', function () { idleTimer = setTimeout(function () { c.autoRotate = true; }, 9000); });
+
+      window.addEventListener('resize', function () {
+        globe.width(window.innerWidth).height(window.innerHeight);
+      });
+      globe.pointOfView({ lat: 25, lng: 10, altitude: 2.6 }, 0);
+    } catch (e) { showError(); }
+  }
+
+  window.setData = function (obj) {
+    if (!globe) return;
+    try {
+      flights = (obj && obj.flights) || [];
+      globe.arcsData(arcsOf()).pathsData(pathsOf());
+      var ap = airportsOf();
+      globe.pointsData(ap).labelsData(ap);
+      fit(obj ? obj.focus : null);
+    } catch (e) {}
+  };
+
+  init();
+})();
+</script>
+</body>
+</html>
