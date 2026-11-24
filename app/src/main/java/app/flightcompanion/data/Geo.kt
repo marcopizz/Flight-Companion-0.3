@@ -80,22 +80,41 @@ class AirportInfo(
     val name: String,
     val city: String,
     val country: String,
-    val tz: String?
+    val tz: String?,
+    val icao: String,
+    val elevFt: Int?,
+    val home: String?,
+    val wiki: String?
 )
 
-/** Aeroporti per codice IATA (OurAirports + OpenFlights): coordinate, nome, città, paese, fuso orario. */
+class Runway(
+    val le: String,
+    val he: String,
+    val lengthFt: Int?,
+    val widthFt: Int?,
+    val surface: String,
+    val lighted: Boolean,
+    val closed: Boolean
+)
+
+class Freq(val type: String, val description: String, val mhz: String)
+
+/** Aeroporti per codice IATA (OurAirports + OpenFlights): coordinate, nome, città, paese, fuso, ICAO, quota, link. */
 object AirportDb {
     private val map: Map<String, AirportInfo> by lazy {
-        val m = HashMap<String, AirportInfo>()
+        val m = LinkedHashMap<String, AirportInfo>()
         try {
             Graph.appContext.assets.open("airports.csv").bufferedReader().useLines { seq ->
                 for (line in seq) {
                     val p = line.split('|')
-                    if (p.size < 7) continue
+                    if (p.size < 11) continue
                     val la = p[1].toDoubleOrNull()
                     val lo = p[2].toDoubleOrNull()
                     if (la == null || lo == null) continue
-                    m[p[0]] = AirportInfo(p[0], la, lo, p[3], p[4], p[5], p[6].ifBlank { null })
+                    m[p[0]] = AirportInfo(
+                        p[0], la, lo, p[3], p[4], p[5], p[6].ifBlank { null },
+                        p[7], p[8].toIntOrNull(), p[9].ifBlank { null }, p[10].ifBlank { null }
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -107,6 +126,62 @@ object AirportDb {
     fun get(iata: String?): AirportInfo? = if (iata == null) null else map[iata.uppercase()]
 
     fun coords(iata: String?): Pair<Double, Double>? = get(iata)?.let { it.lat to it.lon }
+
+    /** Ricerca durante la digitazione: codice IATA/ICAO, nome o città. */
+    fun search(query: String, limit: Int = 8): List<AirportInfo> {
+        val q = query.trim().lowercase()
+        if (q.length < 2) return emptyList()
+        val scored = ArrayList<Pair<Int, AirportInfo>>()
+        for (a in map.values) {
+            val score = when {
+                a.iata.lowercase() == q || a.icao.lowercase() == q -> 0
+                a.iata.lowercase().startsWith(q) || a.icao.lowercase().startsWith(q) -> 1
+                a.city.lowercase().startsWith(q) -> 2
+                a.name.lowercase().contains(q) -> 3
+                a.city.lowercase().contains(q) -> 4
+                else -> -1
+            }
+            if (score >= 0) scored.add(score to a)
+        }
+        return scored.sortedWith(compareBy<Pair<Int, AirportInfo>>({ it.first }, { it.second.name })).take(limit).map { it.second }
+    }
+
+    fun runways(icao: String): List<Runway> {
+        val out = ArrayList<Runway>()
+        if (icao.isBlank()) return out
+        try {
+            Graph.appContext.assets.open("runways.csv").bufferedReader().useLines { seq ->
+                for (line in seq) {
+                    if (!line.startsWith("$icao|")) continue
+                    val p = line.split('|')
+                    if (p.size < 8) continue
+                    out.add(Runway(p[1], p[2], p[3].toIntOrNull(), p[4].toIntOrNull(), p[5], p[6] == "1", p[7] == "1"))
+                }
+            }
+        } catch (e: Exception) {
+            // nessun dato piste
+        }
+        return out
+    }
+
+    fun freqs(icao: String): List<Freq> {
+        val out = ArrayList<Freq>()
+        if (icao.isBlank()) return out
+        try {
+            Graph.appContext.assets.open("freqs.csv").bufferedReader().useLines { seq ->
+                for (line in seq) {
+                    if (!line.startsWith("$icao|")) continue
+                    val p = line.split('|')
+                    if (p.size < 4) continue
+                    out.add(Freq(p[1], p[2], p[3]))
+                }
+            }
+        } catch (e: Exception) {
+            // nessun dato frequenze
+        }
+        val order = listOf("ATIS", "TWR", "GND", "CLD", "DEL", "APP", "DEP", "A/D", "AFIS", "CTAF", "UNIC")
+        return out.sortedBy { f -> order.indexOf(f.type).let { if (it < 0) 99 else it } }
+    }
 }
 
 class AirlineInfo(val iata: String, val icao: String, val name: String)

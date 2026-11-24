@@ -79,8 +79,16 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun addAirport(iata: String) {
+        viewModelScope.launch {
+            repo.addAirport(iata)
+            message = "Aeroporto aggiunto: $iata"
+        }
+    }
+
     fun syncNow() {
         viewModelScope.launch {
+            repo.seedAirportsFromFlights()
             repo.syncDue()
         }
     }

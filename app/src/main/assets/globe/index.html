@@ -6,7 +6,7 @@
 <style>
   html, body { margin: 0; height: 100%; background: #02060d; overflow: hidden; }
   #g { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
-  #err { position: absolute; left: 16px; right: 16px; top: 40%; color: #edE7d9; font: 16px sans-serif; text-align: center; display: none; }
+  #err { position: absolute; left: 16px; right: 16px; top: 40%; color: #ede7d9; font: 16px sans-serif; text-align: center; display: none; }
 </style>
 </head>
 <body>
@@ -15,23 +15,32 @@
 <script src="globe.gl.min.js"></script>
 <script>
 (function () {
-  var globe = null, flights = [], idleTimer = null;
+  var globe = null, flights = [], style = null, countries = [], lastLabelKey = null, lastFitKey = null;
   var ORANGE = '#ff7a3d', AMBER = '#ffc400', PAPER = '#f3eee3';
+  var ROUTE_BLUE = '#1a73ff', ROUTE_EDGE = '#ffffff';
 
   function showError() { document.getElementById('err').style.display = 'block'; }
 
   function arcsOf() { return flights.filter(function (f) { return !(f.track && f.track.length > 2); }); }
+
+  // Tratto reale: bordo bianco + anima blu (stile navigatore)
   function pathsOf() {
-    return flights.filter(function (f) { return f.track && f.track.length > 2; }).map(function (f) {
+    var out = [];
+    flights.filter(function (f) { return f.track && f.track.length > 2; }).forEach(function (f) {
       var n = f.track.length;
-      var pts = [[f.depLat, f.depLng, 0.01]];
+      var base = [[f.depLat, f.depLng, 0.004]];
       for (var i = 0; i < n; i++) {
-        pts.push([f.track[i][0], f.track[i][1], 0.012 + 0.05 * Math.sin(Math.PI * i / Math.max(1, n - 1))]);
+        base.push([f.track[i][0], f.track[i][1], 0.006 + 0.03 * Math.sin(Math.PI * i / Math.max(1, n - 1))]);
       }
-      pts.push([f.arrLat, f.arrLng, 0.01]);
-      return { id: f.id, pts: pts };
+      base.push([f.arrLat, f.arrLng, 0.004]);
+      var edge = base.map(function (p) { return [p[0], p[1], p[2]]; });
+      var core = base.map(function (p) { return [p[0], p[1], p[2] + 0.0015]; });
+      out.push({ id: f.id, pts: edge, color: ROUTE_EDGE, stroke: 0.75 });
+      out.push({ id: f.id, pts: core, color: ROUTE_BLUE, stroke: 0.5 });
     });
+    return out;
   }
+
   function airportsOf() {
     var m = {};
     flights.forEach(function (f) {
@@ -39,6 +48,34 @@
       m[f.arr] = { code: f.arr, lat: f.arrLat, lng: f.arrLng };
     });
     return Object.keys(m).map(function (k) { return m[k]; });
+  }
+
+  function refreshLabels(force) {
+    if (!globe) return;
+    var alt = globe.pointOfView().altitude;
+    var showC = style === 'map' && countries.length > 0 && alt < 1.5;
+    var key = (showC ? 'c' : 'a') + '|' + style;
+    if (!force && key === lastLabelKey) return;
+    lastLabelKey = key;
+    var apColor = style === 'map' ? '#14263f' : '#ffffff';
+    var arr = airportsOf().map(function (a) { return { text: a.code, lat: a.lat, lng: a.lng, size: 0.85, color: apColor }; });
+    if (showC) {
+      countries.forEach(function (c) {
+        if (c.r <= 5) arr.push({ text: c.n, lat: c.la, lng: c.lo, size: 0.55, color: '#5a5f69' });
+      });
+    }
+    globe.labelsData(arr);
+  }
+
+  function applyStyle(s) {
+    if (!globe || s === style) return;
+    style = s;
+    if (s === 'map') {
+      globe.globeImageUrl('map.jpg').bumpImageUrl(null).atmosphereColor('#b8d8ff');
+    } else {
+      globe.globeImageUrl('earth.jpg').bumpImageUrl('topology.jpg').atmosphereColor('#8ec5ff');
+    }
+    refreshLabels(true);
   }
 
   function fit(focusId) {
@@ -73,6 +110,17 @@
     try { if (window.AndroidBridge && d && d.id != null) AndroidBridge.openFlight(String(d.id)); } catch (e) {}
   }
 
+  function loadCountries() {
+    try {
+      var x = new XMLHttpRequest();
+      x.open('GET', 'countries.json');
+      x.onload = function () {
+        try { countries = JSON.parse(x.responseText); refreshLabels(true); } catch (e) {}
+      };
+      x.send();
+    } catch (e) {}
+  }
+
   function init() {
     try {
       var el = document.getElementById('g');
@@ -90,23 +138,24 @@
         .onArcClick(openFlight)
         .pathPoints('pts').pathPointLat(function (p) { return p[0]; }).pathPointLng(function (p) { return p[1]; })
         .pathPointAlt(function (p) { return p[2]; })
-        .pathColor(function () { return [PAPER, ORANGE]; }).pathStroke(1.1).pathTransitionDuration(0)
+        .pathColor('color').pathStroke('stroke').pathTransitionDuration(0)
         .onPathClick(openFlight)
         .pointLat('lat').pointLng('lng').pointAltitude(0.012).pointRadius(0.28).pointColor(function () { return AMBER; })
-        .labelLat('lat').labelLng('lng').labelText('code').labelSize(0.85).labelDotRadius(0.0)
-        .labelAltitude(0.02).labelColor(function () { return '#ffffff'; }).labelResolution(2);
+        .labelLat('lat').labelLng('lng').labelText('text').labelSize('size').labelDotRadius(0.0)
+        .labelAltitude(0.02).labelColor('color').labelResolution(2);
+      style = 'sat';
 
       var c = globe.controls();
-      c.autoRotate = true; c.autoRotateSpeed = 0.35;
+      c.autoRotate = false;
       c.enableDamping = true; c.dampingFactor = 0.08;
       c.minDistance = 115; c.maxDistance = 620; c.zoomSpeed = 0.9; c.rotateSpeed = 0.6;
-      c.addEventListener('start', function () { c.autoRotate = false; if (idleTimer) clearTimeout(idleTimer); });
-      c.addEventListener('end', function () { idleTimer = setTimeout(function () { c.autoRotate = true; }, 9000); });
+      c.addEventListener('change', function () { refreshLabels(false); });
 
       window.addEventListener('resize', function () {
         globe.width(window.innerWidth).height(window.innerHeight);
       });
       globe.pointOfView({ lat: 25, lng: 10, altitude: 2.6 }, 0);
+      loadCountries();
     } catch (e) { showError(); }
   }
 
@@ -114,10 +163,13 @@
     if (!globe) return;
     try {
       flights = (obj && obj.flights) || [];
+      applyStyle((obj && obj.style) === 'map' ? 'map' : 'sat');
       globe.arcsData(arcsOf()).pathsData(pathsOf());
       var ap = airportsOf();
-      globe.pointsData(ap).labelsData(ap);
-      fit(obj ? obj.focus : null);
+      globe.pointsData(ap);
+      refreshLabels(true);
+      var fitKey = flights.map(function (f) { return f.id; }).join(',') + '|' + (obj ? obj.focus : '');
+      if (fitKey !== lastFitKey) { lastFitKey = fitKey; fit(obj ? obj.focus : null); }
     } catch (e) {}
   };
 

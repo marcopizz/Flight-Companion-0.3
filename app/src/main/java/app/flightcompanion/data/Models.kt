@@ -75,8 +75,24 @@ data class Flight(
     val photographer: String? = null,
     val photoTried: Boolean = false,
 
+    // Aereo in arrivo (volo precedente della stessa matricola), JSON compatto
+    val inboundJson: String? = null,
+    val inboundAt: Long = 0,
+
     val completed: Boolean = false,
     val lastFetchedAt: Long = 0
 ) {
     val isCanceled: Boolean get() = status.startsWith("Cancel")
 }
+
+/** Aeroporto nell'elenco dell'utente: preferito, aggiunto a mano o da un volo, con meteo e mappa PDF. */
+@Entity(tableName = "airports")
+data class SavedAirport(
+    @PrimaryKey val iata: String,
+    val favorite: Boolean = false,
+    val addedAt: Long = 0,
+    val pdfPath: String? = null,
+    val metar: String? = null,
+    val taf: String? = null,
+    val metarAt: Long = 0
+)

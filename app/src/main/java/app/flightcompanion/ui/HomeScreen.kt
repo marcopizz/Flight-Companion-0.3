@@ -26,7 +26,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocalAirport
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -77,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.flightcompanion.data.Flight
 import app.flightcompanion.data.FlightDto
+import app.flightcompanion.data.Prefs
 import app.flightcompanion.data.fmtCountdown
 import app.flightcompanion.data.fmtDayMonth
 import app.flightcompanion.data.fmtDuration
@@ -95,10 +98,12 @@ fun HomeScreen(
     onOpen: (Long) -> Unit,
     onOpenMap: (String) -> Unit,
     onManual: () -> Unit,
+    onOpenAirport: (String) -> Unit,
     onSettings: () -> Unit
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showAdd by remember { mutableStateOf(false) }
+    var showAddAirport by remember { mutableStateOf(false) }
     val upcoming by vm.upcoming.collectAsState()
     val past by vm.past.collectAsState()
     val snack = remember { SnackbarHostState() }
@@ -111,7 +116,7 @@ fun HomeScreen(
         }
     }
 
-    val titles = listOf("IN ARRIVO", "STORICO", "STATISTICHE")
+    val titles = listOf("IN ARRIVO", "STORICO", "AEROPORTI", "PASSPORT")
 
     Scaffold(
         topBar = {
@@ -142,22 +147,27 @@ fun HomeScreen(
                 )
                 NavigationBarItem(
                     selected = tab == 2, onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.BarChart, contentDescription = null) },
-                    label = { Text("Statistiche") }
+                    icon = { Icon(Icons.Filled.LocalAirport, contentDescription = null) },
+                    label = { Text("Aeroporti") }
+                )
+                NavigationBarItem(
+                    selected = tab == 3, onClick = { tab = 3 },
+                    icon = { Icon(Icons.Filled.Badge, contentDescription = null) },
+                    label = { Text("Passport") }
                 )
             }
         },
         floatingActionButton = {
-            if (tab != 2) {
-                FloatingActionButton(onClick = { showAdd = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = "Aggiungi volo")
+            if (tab != 3) {
+                FloatingActionButton(onClick = { if (tab == 2) showAddAirport = true else showAdd = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = if (tab == 2) "Aggiungi aeroporto" else "Aggiungi volo")
                 }
             }
         },
         snackbarHost = { SnackbarHost(snack) }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
-            if (tab != 2) {
+            if (tab == 0 || tab == 1) {
                 FlightsPane(
                     flights = if (tab == 0) upcoming else past,
                     heading = if (tab == 0) "Voli in programma" else "Voli effettuati",
@@ -165,6 +175,8 @@ fun HomeScreen(
                     onOpen = onOpen,
                     onOpenGlobe = { onOpenMap(if (tab == 0) "upcoming" else "past") }
                 )
+            } else if (tab == 2) {
+                AirportsScreen(onOpenAirport)
             } else {
                 StatsScreen(past)
             }
@@ -184,6 +196,15 @@ fun HomeScreen(
             onConfirm = { n, d ->
                 showAdd = false
                 vm.search(n, d)
+            }
+        )
+    }
+    if (showAddAirport) {
+        AddAirportDialog(
+            onDismiss = { showAddAirport = false },
+            onPick = { a ->
+                showAddAirport = false
+                vm.addAirport(a.iata)
             }
         )
     }
@@ -263,8 +284,14 @@ fun FlightsPane(
         }
 
         // Globo
+        var style by remember { mutableStateOf(Prefs.mapStyle) }
         Box(Modifier.fillMaxWidth().height(maxHeight * 0.75f)) {
-            FlightGlobe(flights, Modifier.fillMaxSize(), onOpenFlight = onOpen)
+            FlightGlobe(flights, Modifier.fillMaxSize(), style = style, onOpenFlight = onOpen)
+            MapStyleToggle(
+                style = style,
+                onChange = { style = it; Prefs.mapStyle = it },
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
+            )
             IconButton(
                 onClick = onOpenGlobe,
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
@@ -371,8 +398,8 @@ fun TicketCell(label: String, modifier: Modifier = Modifier, valueColor: Color =
 }
 
 @Composable
-fun GateSign(gate: String?, terminal: String?) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+fun GateSign(gate: String?, terminal: String?, onClick: (() -> Unit)? = null) {
+    Row(modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         if (terminal != null) {
             Box(Modifier.clip(RoundedCornerShape(3.dp)).background(Ink).padding(horizontal = 6.dp, vertical = 3.dp)) {
                 Text("T$terminal", color = Color.White, fontFamily = PlexMono, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)

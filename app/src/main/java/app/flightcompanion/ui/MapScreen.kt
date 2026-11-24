@@ -17,13 +17,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.flightcompanion.data.Flight
+import app.flightcompanion.data.Prefs
 
 /** Globo 3D a schermo intero. mode: "upcoming", "past" oppure "flight-<id>". */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,6 +42,7 @@ fun MapScreen(mode: String, vm: MainViewModel, onOpenFlight: (Long) -> Unit, onB
             else -> upcoming
         }
     }
+    var style by remember { mutableStateOf(Prefs.mapStyle) }
     val title = when {
         mode == "past" -> "GLOBO · STORICO"
         focusId != null -> "GLOBO · VOLO"
@@ -58,7 +62,12 @@ fun MapScreen(mode: String, vm: MainViewModel, onOpenFlight: (Long) -> Unit, onB
         }
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
-            FlightGlobe(flights, Modifier.fillMaxSize(), focusId = focusId, onOpenFlight = onOpenFlight)
+            FlightGlobe(flights, Modifier.fillMaxSize(), focusId = focusId, style = style, onOpenFlight = onOpenFlight)
+            MapStyleToggle(
+                style = style,
+                onChange = { style = it; Prefs.mapStyle = it },
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
+            )
             Text(
                 "Trascina per ruotare · pizzica per lo zoom · tocca una rotta",
                 style = MaterialTheme.typography.labelSmall,

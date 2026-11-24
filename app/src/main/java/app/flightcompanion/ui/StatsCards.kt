@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import app.flightcompanion.data.Flight
 import app.flightcompanion.data.Stats
 import app.flightcompanion.data.fmtAge
+import app.flightcompanion.data.fmtHm
 
 private val Navy = Color(0xFF0B2A5B)
 private val Chalk = Color(0xFFF3EEE3)
@@ -178,7 +179,7 @@ fun DelayCard(label: String, s: Stats) {
             Spacer(Modifier.height(16.dp))
             Text("COMPAGNIA PEGGIORE", color = Color.White, style = MaterialTheme.typography.titleLarge)
             Text(
-                "${worst[0].name} • ${worst[0].minutes / 60} ore di ritardo in totale",
+                "${worst[0].name} • ${fmtHm(worst[0].minutes)} di ritardo in totale",
                 color = Color(0xFFB8B8B8), fontSize = 13.sp
             )
             Spacer(Modifier.height(8.dp))
@@ -197,10 +198,25 @@ fun DelayCard(label: String, s: Stats) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 for (a in worst) {
                     Text(
-                        "${a.minutes / 60}h",
+                        fmtHm(a.minutes),
                         color = Color(0xFFFF8A5C), fontFamily = PlexMono, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight((a.minutes.coerceAtLeast(1)).toFloat())
                     )
+                }
+            }
+        }
+
+        val apts = s.airportDelays.take(5)
+        if (apts.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Text("AEROPORTI CON PIÙ RITARDO", color = Color.White, style = MaterialTheme.typography.titleLarge)
+            Text("ritardo accumulato alla partenza", color = Color(0xFFB8B8B8), fontSize = 13.sp)
+            Spacer(Modifier.height(8.dp))
+            apts.forEachIndexed { i, (name, minutes) ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${i + 1}.", color = Color(0xFFB8B8B8), fontFamily = PlexMono, fontSize = 13.sp, modifier = Modifier.width(26.dp))
+                    Text(name, color = Color.White, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(fmtHm(minutes), color = Color(0xFFFFB000), fontFamily = PlexMono, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
             }
         }

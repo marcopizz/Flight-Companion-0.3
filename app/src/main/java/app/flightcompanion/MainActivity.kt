@@ -3,6 +3,7 @@ package app.flightcompanion
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,6 +26,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import app.flightcompanion.ui.AirportDetailScreen
+import app.flightcompanion.ui.AirportMapScreen
 import app.flightcompanion.ui.DetailScreen
 import app.flightcompanion.ui.FlightTheme
 import app.flightcompanion.ui.HomeScreen
@@ -67,6 +70,7 @@ fun AppRoot() {
                 onOpen = { nav.navigate("detail/$it") },
                 onOpenMap = { nav.navigate("map/$it") },
                 onManual = { nav.navigate("manual") },
+                onOpenAirport = { nav.navigate("airport/$it") },
                 onSettings = { nav.navigate("settings") }
             )
         }
@@ -74,6 +78,27 @@ fun AppRoot() {
             DetailScreen(
                 e.arguments?.getLong("id") ?: 0L,
                 onOpenMap = { nav.navigate("map/$it") },
+                onOpenAirport = { nav.navigate("airport/$it") },
+                onOpenAirportMap = { code, gate -> nav.navigate("airportmap/$code/${if (gate.isNullOrBlank()) "-" else Uri.encode(gate)}") },
+                onBack = { nav.popBackStack() }
+            )
+        }
+        composable("airport/{iata}", arguments = listOf(navArgument("iata") { type = NavType.StringType })) { e ->
+            AirportDetailScreen(
+                iata = e.arguments?.getString("iata") ?: "",
+                onBack = { nav.popBackStack() },
+                onOpenMap = { nav.navigate("airportmap/$it/-") },
+                onOpenFlight = { nav.navigate("detail/$it") }
+            )
+        }
+        composable(
+            "airportmap/{iata}/{gate}",
+            arguments = listOf(navArgument("iata") { type = NavType.StringType }, navArgument("gate") { type = NavType.StringType })
+        ) { e ->
+            val g = e.arguments?.getString("gate")
+            AirportMapScreen(
+                iata = e.arguments?.getString("iata") ?: "",
+                gate = if (g == null || g == "-") null else g,
                 onBack = { nav.popBackStack() }
             )
         }

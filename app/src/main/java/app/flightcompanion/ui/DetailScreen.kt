@@ -70,6 +70,7 @@ import app.flightcompanion.data.flagEmoji
 import app.flightcompanion.data.kmToMiles
 import app.flightcompanion.data.manufacturerOf
 import app.flightcompanion.data.statusIt
+import org.json.JSONObject
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -80,7 +81,13 @@ private val REASONS = listOf("Lavoro", "Vacanza", "Famiglia", "Altro")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailScreen(id: Long, onOpenMap: (String) -> Unit, onBack: () -> Unit) {
+fun DetailScreen(
+    id: Long,
+    onOpenMap: (String) -> Unit,
+    onOpenAirport: (String) -> Unit,
+    onOpenAirportMap: (String, String?) -> Unit,
+    onBack: () -> Unit
+) {
     val flight by Graph.repo.observe(id).collectAsState(initial = null)
     val f = flight
 
@@ -106,13 +113,20 @@ fun DetailScreen(id: Long, onOpenMap: (String) -> Unit, onBack: () -> Unit) {
         if (f == null) {
             Text("Caricamento…", Modifier.padding(pad).padding(16.dp))
         } else {
-            DetailContent(f, Modifier.padding(pad), onOpenMap, onBack)
+            DetailContent(f, Modifier.padding(pad), onOpenMap, onOpenAirport, onOpenAirportMap, onBack)
         }
     }
 }
 
 @Composable
-private fun DetailContent(f: Flight, modifier: Modifier, onOpenMap: (String) -> Unit, onBack: () -> Unit) {
+private fun DetailContent(
+    f: Flight,
+    modifier: Modifier,
+    onOpenMap: (String) -> Unit,
+    onOpenAirport: (String) -> Unit,
+    onOpenAirportMap: (String, String?) -> Unit,
+    onBack: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     val past by Graph.repo.past().collectAsState(initial = emptyList())
@@ -134,7 +148,8 @@ private fun DetailContent(f: Flight, modifier: Modifier, onOpenMap: (String) -> 
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         HeroTicket(f, now)
-        TimelineCard(f, now)
+        TimelineCard(f, now, onOpenAirport, onOpenAirportMap)
+        if (!f.completed) InboundCard(f)
         MetricsRow(f, useMiles)
 
         // ---- Aereo
@@ -406,7 +421,12 @@ private fun plannedMinutes(f: Flight): Int? {
 }
 
 @Composable
-private fun TimelineCard(f: Flight, now: Long) {
+private fun TimelineCard(
+    f: Flight,
+    now: Long,
+    onOpenAirport: (String) -> Unit,
+    onOpenAirportMap: (String, String?) -> Unit
+) {
     val dep = f.depActualUtc ?: f.depRevisedUtc ?: f.depScheduledUtc
     val arr = f.arrActualUtc ?: f.arrRevisedUtc ?: f.arrScheduledUtc
     val progress = when {
@@ -422,11 +442,15 @@ private fun TimelineCard(f: Flight, now: Long) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TimeColumn(
                     "PARTENZA", f.depScheduledUtc, f.depRevisedUtc ?: f.depActualUtc, f.depTz, f.depName,
-                    gate = f.depGate, terminal = f.depTerminal, belt = null, alignEnd = false
+                    gate = f.depGate, terminal = f.depTerminal, belt = null, alignEnd = false,
+                    onGate = { f.depIata?.let { onOpenAirportMap(it, f.depGate) } },
+                    onAirport = { f.depIata?.let { onOpenAirport(it) } }
                 )
                 TimeColumn(
                     "ARRIVO", f.arrScheduledUtc, f.arrRevisedUtc ?: f.arrActualUtc, f.arrTz, f.arrName,
-                    gate = f.arrGate, terminal = f.arrTerminal, belt = f.baggageBelt, alignEnd = true
+                    gate = f.arrGate, terminal = f.arrTerminal, belt = f.baggageBelt, alignEnd = true,
+                    onGate = { f.arrIata?.let { onOpenAirportMap(it, f.arrGate) } },
+                    onAirport = { f.arrIata?.let { onOpenAirport(it) } }
                 )
             }
             Canvas(Modifier.fillMaxWidth().height(22.dp)) {
@@ -453,7 +477,9 @@ private fun TimeColumn(
     gate: String?,
     terminal: String?,
     belt: String?,
-    alignEnd: Boolean
+    alignEnd: Boolean,
+    onGate: () -> Unit,
+    onAirport: () -> Unit
 ) {
     val delta = if (scheduled != null && revised != null) ((revised - scheduled) / 60_000L).toInt() else null
     Column(horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
@@ -467,10 +493,18 @@ private fun TimeColumn(
             )
         }
         Text(fmtDateTime(revised ?: scheduled, tz).take(10), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (airport != null) Text(airport, style = MaterialTheme.typography.bodySmall, maxLines = 2)
+        if (airport != null) {
+            Text(
+                airport,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 2,
+                modifier = Modifier.clickable { onAirport() }
+            )
+        }
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (gate != null || terminal != null) GateSign(gate, terminal)
+            if (gate != null || terminal != null) GateSign(gate, terminal, onClick = onGate)
             if (belt != null) {
                 Box(Modifier.clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.secondary).padding(horizontal = 8.dp, vertical = 3.dp)) {
                     Text("NASTRO $belt", color = MaterialTheme.colorScheme.onSecondary, fontFamily = PlexMono, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
@@ -550,6 +584,115 @@ private fun ChipRow(options: List<String>, selected: String?, onSelect: (String?
                 onClick = { onSelect(if (selected == o) null else o) },
                 label = { Text(o) }
             )
+        }
+    }
+}
+
+private fun JSONObject.longOrNull(k: String): Long? = if (!has(k) || isNull(k)) null else getLong(k)
+
+/** Da dove arriva l'aereo del volo in programma: atterrato o in arrivo, orario, ritardo e margine di rotazione. */
+@Composable
+private fun InboundCard(f: Flight) {
+    val scope = rememberCoroutineScope()
+    val view = remember(f.inboundJson) { f.inboundJson?.let { try { JSONObject(it) } catch (e: Exception) { null } } }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val now = System.currentTimeMillis()
+
+    LaunchedEffect(f.id, f.aircraftReg) {
+        val dep = f.depRevisedUtc ?: f.depScheduledUtc
+        if (f.aircraftReg != null && dep != null && dep - now < 36 * 3_600_000L && now - f.inboundAt > 10 * 60_000L) {
+            busy = true
+            msg = Graph.repo.refreshInbound(f.id, false)
+            busy = false
+        }
+    }
+
+    SectionTitle("Da dove arriva l'aereo")
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                f.aircraftReg == null -> Text(
+                    "La matricola non è ancora assegnata: di solito compare alcune ore prima della partenza.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                view == null -> Text("Nessun dato ancora: premi il pulsante per controllare.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                view.optBoolean("none") -> Text(
+                    "Nessun volo precedente trovato per questo aereo: potrebbe aver pernottato qui, oppure il dato non è ancora disponibile.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                else -> {
+                    val sched = view.longOrNull("schedArr")
+                    val rev = view.longOrNull("revArr")
+                    val act = view.longOrNull("actArr")
+                    val status = view.optString("status")
+                    val landed = act != null || status == "Arrived"
+                    val shown = act ?: rev ?: sched
+                    val delay = if (shown != null && sched != null) ((shown - sched) / 60_000L).toInt() else null
+                    val ourDep = f.depRevisedUtc ?: f.depScheduledUtc
+                    val margin = if (shown != null && ourDep != null) ((ourDep - shown) / 60_000L).toInt() else null
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "${view.optString("fromIata")}  ${view.optString("fromCity")}",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
+                            Text(
+                                "${view.optString("number")}  ·  ${view.optString("airline")}",
+                                fontFamily = PlexMono, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            statusIt(status).uppercase(),
+                            fontFamily = PlexMono, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        TicketCell(if (landed) "ATTERRATO ALLE" else "ATTERRAGGIO PREVISTO") {
+                            Text(fmtTime(shown, f.depTz), fontFamily = PlexMono, fontWeight = FontWeight.SemiBold, fontSize = 28.sp)
+                        }
+                        TicketCell("PUNTUALITÀ") {
+                            val (text, color) = when {
+                                delay == null -> "—" to MaterialTheme.colorScheme.onSurface
+                                delay >= 15 -> "In ritardo di $delay min" to MaterialTheme.colorScheme.error
+                                delay >= 5 -> "In ritardo di $delay min" to Color(0xFFC77D00)
+                                delay <= -5 -> "In anticipo di ${-delay} min" to MaterialTheme.colorScheme.tertiary
+                                else -> "In orario" to MaterialTheme.colorScheme.tertiary
+                            }
+                            Text(text, fontFamily = PlexMono, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = color)
+                        }
+                    }
+                    if (margin != null) {
+                        val tight = margin < 30
+                        Text(
+                            "Rotazione: ${if (margin >= 0) "$margin min" else "atterra dopo l'orario previsto di partenza"} tra l'atterraggio e il tuo volo" +
+                                if (tight && margin >= 0) " — margine ridotto, il tuo volo potrebbe slittare." else ".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (tight) Color(0xFFC77D00) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            if (f.inboundAt > 0) {
+                Text(
+                    "Aggiornato alle ${fmtTime(f.inboundAt, f.depTz)} (ora locale)",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (msg != null) Text(msg ?: "", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(
+                enabled = !busy && f.aircraftReg != null,
+                onClick = {
+                    scope.launch {
+                        busy = true
+                        msg = Graph.repo.refreshInbound(f.id, true)
+                        busy = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (busy) "Controllo in corso…" else "Controlla ora (usa quota API)") }
         }
     }
 }

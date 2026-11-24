@@ -9,12 +9,22 @@ android {
     namespace = "app.flightcompanion"
     compileSdk = 34
 
+    signingConfigs {
+        getByName("debug") {
+            // Chiave fissa: gli aggiornamenti dell'APK si installano sopra la versione precedente
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "app.flightcompanion"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.4"
     }
 
     buildTypes {
@@ -59,5 +69,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.webkit:webkit:1.11.0")
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
     implementation("androidx.compose.animation:animation")
 }

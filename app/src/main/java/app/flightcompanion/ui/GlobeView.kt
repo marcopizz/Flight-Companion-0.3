@@ -8,7 +8,16 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
@@ -32,7 +41,7 @@ private class GlobeState {
     var pending: String? = null
 }
 
-fun globeJson(flights: List<Flight>, focusId: Long?): String {
+fun globeJson(flights: List<Flight>, focusId: Long?, style: String): String {
     val arr = JSONArray()
     for (f in flights) {
         val la1 = f.depLat
@@ -62,6 +71,7 @@ fun globeJson(flights: List<Flight>, focusId: Long?): String {
     val root = JSONObject()
     root.put("flights", arr)
     root.put("focus", focusId ?: JSONObject.NULL)
+    root.put("style", style)
     return root.toString()
 }
 
@@ -72,9 +82,10 @@ fun FlightGlobe(
     flights: List<Flight>,
     modifier: Modifier = Modifier,
     focusId: Long? = null,
+    style: String = "sat",
     onOpenFlight: (Long) -> Unit
 ) {
-    val json = remember(flights, focusId) { globeJson(flights, focusId) }
+    val json = remember(flights, focusId, style) { globeJson(flights, focusId, style) }
     val openState = rememberUpdatedState(onOpenFlight)
 
     AndroidView(
@@ -112,4 +123,27 @@ fun FlightGlobe(
         },
         onRelease = { wv -> wv.destroy() }
     )
+}
+
+/** Selettore Satellite / Mappa da sovrapporre al globo. */
+@Composable
+fun MapStyleToggle(style: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .background(Color(0xB3000000), RoundedCornerShape(8.dp))
+            .padding(3.dp)
+    ) {
+        for ((key, label) in listOf("sat" to "Satellite", "map" to "Mappa")) {
+            val on = style == key
+            Text(
+                label,
+                color = if (on) Color(0xFF0F1B2D) else Color.White,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier
+                    .background(if (on) Color(0xFFF2B200) else Color.Transparent, RoundedCornerShape(6.dp))
+                    .clickable { onChange(key) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+    }
 }

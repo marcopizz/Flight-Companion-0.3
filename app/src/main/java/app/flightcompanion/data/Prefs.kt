@@ -35,6 +35,19 @@ object Prefs {
             sp.edit().putString("os_secret", v.trim()).apply()
         }
 
+    /** "sat" (satellite) oppure "map" (topografica). */
+    var mapStyle: String
+        get() = sp.getString("map_style", "sat") ?: "sat"
+        set(v) {
+            sp.edit().putString("map_style", v).apply()
+        }
+
+    var airportsSeeded: Boolean
+        get() = sp.getBoolean("airports_seeded", false)
+        set(v) {
+            sp.edit().putBoolean("airports_seeded", v).apply()
+        }
+
     private fun monthKey() = "calls_" + YearMonth.now().toString()
 
     fun callsThisMonth(): Int = sp.getInt(monthKey(), 0)

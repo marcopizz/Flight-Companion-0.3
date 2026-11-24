@@ -1,6 +1,11 @@
 package app.flightcompanion.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.OffsetDateTime
@@ -29,7 +34,7 @@ sealed class Lookup {
     data class Error(val msg: String) : Lookup()
 }
 
-class Repository(private val dao: FlightDao) {
+class Repository(private val dao: FlightDao, private val airportDao: AirportDao) {
 
     private val H = 3_600_000L
     private val M = 60_000L
@@ -82,6 +87,8 @@ class Repository(private val dao: FlightDao) {
         val base = Flight(flightNumber = normalize(numberRaw), dateLocal = date)
         val f = applyDto(base, dto).copy(lastFetchedAt = System.currentTimeMillis())
         val id = dao.insert(f)
+        ensureAirport(f.depIata)
+        ensureAirport(f.arrIata)
         maybeFinalize(id)
         return id
     }
@@ -392,6 +399,8 @@ class Repository(private val dao: FlightDao) {
             completed = true
         )
         val id = dao.insert(f)
+        ensureAirport(f.depIata)
+        ensureAirport(f.arrIata)
         ensurePhoto(id)
         return id
     }
@@ -402,4 +411,168 @@ class Repository(private val dao: FlightDao) {
         dao.updateManual(id, seat?.ifBlank { null }, seatType, cls, reason)
 
     suspend fun delete(f: Flight) = dao.delete(f)
+
+    // ---------- Aeroporti ----------
+
+    fun airports(): Flow<List<SavedAirport>> = airportDao.observeAll()
+    fun airport(iata: String): Flow<SavedAirport?> = airportDao.observe(iata)
+
+    suspend fun ensureAirport(iata: String?) {
+        val code = iata?.uppercase() ?: return
+        if (AirportDb.get(code) == null) return
+        airportDao.insertIgnore(SavedAirport(iata = code, addedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun addAirport(iata: String) = ensureAirport(iata)
+
+    suspend fun setFavorite(iata: String, fav: Boolean) = airportDao.setFavorite(iata, fav)
+
+    suspend fun removeAirport(iata: String) = airportDao.delete(iata)
+
+    /** Una tantum: aggiunge all'elenco gli aeroporti dei voli in programma già presenti. */
+    suspend fun seedAirportsFromFlights() {
+        if (Prefs.airportsSeeded) return
+        for (f in dao.pending()) {
+            ensureAirport(f.depIata)
+            ensureAirport(f.arrIata)
+        }
+        Prefs.airportsSeeded = true
+    }
+
+    /** Meteo aeronautico (METAR + TAF) su richiesta. Ritorna un messaggio d'errore oppure null se ok. */
+    suspend fun refreshWeather(iata: String): String? {
+        val icao = AirportDb.get(iata)?.icao?.takeIf { it.isNotBlank() } ?: return "Codice ICAO non disponibile per questo aeroporto."
+        return try {
+            val m = Net.wx.metar(icao, "json")
+            val t = Net.wx.taf(icao, "json")
+            if (m.code() == 429 || t.code() == 429) return "Troppe richieste al servizio meteo: riprova tra poco."
+            val metarObj = m.body()?.let { if (it.size() > 0) it[0].asJsonObject.toString() else null }
+            val tafRaw = t.body()?.let {
+                if (it.size() > 0) it[0].asJsonObject.get("rawTAF")?.takeIf { e -> !e.isJsonNull }?.asString else null
+            }
+            if (metarObj == null && tafRaw == null) {
+                "Nessuna osservazione METAR/TAF disponibile per $icao."
+            } else {
+                airportDao.setWeather(iata, metarObj, tafRaw, System.currentTimeMillis())
+                null
+            }
+        } catch (e: Exception) {
+            "Errore di rete: ${e.message}"
+        }
+    }
+
+    /** Gate di un aeroporto da OpenStreetMap (nodi aeroway=gate), salvati in cache dopo il primo scaricamento. */
+    class Gate(val ref: String, val lat: Double, val lon: Double)
+
+    private fun gatesFile(iata: String) = File(File(Graph.appContext.filesDir, "gates").apply { mkdirs() }, "$iata.txt")
+
+    fun cachedGates(iata: String): List<Gate> {
+        val f = gatesFile(iata)
+        if (!f.exists()) return emptyList()
+        return try {
+            f.readLines().mapNotNull { line ->
+                val p = line.split('|')
+                if (p.size < 3) null else {
+                    val la = p[1].toDoubleOrNull()
+                    val lo = p[2].toDoubleOrNull()
+                    if (la == null || lo == null) null else Gate(p[0], la, lo)
+                }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun downloadGates(iata: String): String? {
+        val a = AirportDb.get(iata) ?: return "Aeroporto sconosciuto."
+        val q = "[out:json][timeout:30];node[\"aeroway\"=\"gate\"](around:6000,${a.lat},${a.lon});out;"
+        return try {
+            val r = Net.overpass.query(q)
+            if (!r.isSuccessful) return "Il server OpenStreetMap ha risposto con errore ${r.code()}."
+            val els = r.body()?.getAsJsonArray("elements") ?: return "Risposta vuota da OpenStreetMap."
+            val lines = ArrayList<String>()
+            for (e in els) {
+                val o = e.asJsonObject
+                val ref = o.getAsJsonObject("tags")?.get("ref")?.takeIf { x -> !x.isJsonNull }?.asString ?: continue
+                lines.add("${ref.replace('|', ' ')}|${o.get("lat").asDouble}|${o.get("lon").asDouble}")
+            }
+            withContext(Dispatchers.IO) { gatesFile(iata).writeText(lines.joinToString("\n")) }
+            if (lines.isEmpty()) "Nessun gate mappato in OpenStreetMap per questo aeroporto." else null
+        } catch (e: Exception) {
+            "Errore di rete: ${e.message}"
+        }
+    }
+
+    /** Copia il PDF scelto dall'utente nello spazio dell'app, così resta disponibile offline. */
+    suspend fun importPdf(iata: String, uri: android.net.Uri): String? =
+        withContext(Dispatchers.IO) {
+            try {
+                val dir = File(Graph.appContext.filesDir, "airport_pdf").apply { mkdirs() }
+                val dest = File(dir, "$iata.pdf")
+                Graph.appContext.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out) }
+                } ?: return@withContext "Impossibile leggere il file."
+                airportDao.setPdf(iata, dest.absolutePath)
+                null
+            } catch (e: Exception) {
+                "Errore durante l'importazione: ${e.message}"
+            }
+        }
+
+    suspend fun removePdf(iata: String) {
+        val a = airportDao.get(iata)
+        a?.pdfPath?.let { File(it).delete() }
+        airportDao.setPdf(iata, null)
+    }
+
+    // ---------- Aereo in arrivo (volo precedente della stessa matricola) ----------
+
+    /** Cerca il volo che porta l'aereo all'aeroporto di partenza. Ritorna un messaggio d'errore o null. */
+    suspend fun refreshInbound(id: Long, force: Boolean): String? {
+        val f = dao.get(id) ?: return "Volo non trovato."
+        val reg = f.aircraftReg ?: return "La matricola dell'aereo non è ancora stata assegnata."
+        val depIata = f.depIata ?: return "Aeroporto di partenza sconosciuto."
+        val depSched = f.depScheduledUtc ?: return "Orario di partenza sconosciuto."
+        val now = System.currentTimeMillis()
+        if (!force && now - f.inboundAt < 10 * M) return null
+        if (Prefs.apiKey.isBlank()) return "Inserisci la chiave API nelle Impostazioni."
+        return try {
+            val prevDay = try { LocalDate.parse(f.dateLocal).minusDays(1).toString() } catch (e: Exception) { f.dateLocal }
+            var best: FlightDto? = null
+            for (d in listOf(f.dateLocal, prevDay)) {
+                val r = Net.aero.flightsByReg(reg, d, "Both", false)
+                if (r.code() == 401 || r.code() == 403) return "Chiave API non valida o non abilitata."
+                if (r.code() == 429) return "Quota API esaurita."
+                if (!r.isSuccessful) continue
+                val cand = r.body().orEmpty().filter {
+                    it.arrival?.airport?.iata == depIata && it.number?.replace(" ", "") != f.flightNumber
+                }.filter { dto ->
+                    val t = parseUtc(dto.arrival?.scheduledTime?.utc)
+                    t != null && t <= depSched + 30 * M
+                }
+                best = cand.maxByOrNull { parseUtc(it.arrival?.scheduledTime?.utc) ?: 0L }
+                if (best != null) break
+            }
+            val json = JSONObject()
+            if (best == null) {
+                json.put("none", true)
+            } else {
+                val a = best.arrival
+                val dpt = best.departure
+                json.put("number", best.number ?: "")
+                json.put("airline", best.airline?.name ?: "")
+                json.put("status", best.status ?: "")
+                json.put("fromIata", dpt?.airport?.iata ?: "")
+                json.put("fromCity", dpt?.airport?.municipalityName ?: dpt?.airport?.name ?: "")
+                json.put("schedArr", parseUtc(a?.scheduledTime?.utc) ?: JSONObject.NULL)
+                json.put("revArr", parseUtc(a?.revisedTime?.utc) ?: JSONObject.NULL)
+                json.put("actArr", parseUtc(a?.runwayTime?.utc) ?: JSONObject.NULL)
+                json.put("schedDep", parseUtc(dpt?.scheduledTime?.utc) ?: JSONObject.NULL)
+            }
+            dao.updateInbound(id, json.toString(), now)
+            null
+        } catch (e: Exception) {
+            "Errore di rete: ${e.message}"
+        }
+    }
 }

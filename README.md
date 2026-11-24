@@ -1,4 +1,4 @@
-# Flight Companion (v0.3)
+# Flight Companion (v0.4)
 
 App Android per seguire i propri voli: gate e variazioni, storico, mappa, statistiche e recap "passaporto".
 
@@ -13,6 +13,15 @@ App Android per seguire i propri voli: gate e variazioni, storico, mappa, statis
 - Crea un account gratuito su rapidapi.com, iscriviti al piano Basic di **AeroDataBox** e copia la `X-RapidAPI-Key`.
 - Nell'app: icona ingranaggio → incolla la chiave → Salva.
 - Meteo: Open-Meteo (senza chiave). Mappa e statistiche: calcolate offline sul telefono.
+
+## Novità della v0.4
+- Nuova tab **Aeroporti** (e la tab Statistiche diventa **Passport**): elenco con preferiti in cima, aggiunta con ricerca per codice, nome o città; gli aeroporti dei voli in programma si aggiungono da soli.
+- Scheda aeroporto: dati di base, piste e frequenze radio (OurAirports), meteo METAR/TAF aggiornabile a mano (NOAA Aviation Weather Center), I miei dati (voli, ritardi, gate più usato).
+- Mappa dell'aeroporto: OpenStreetMap con il gate in giallo (coordinate dei gate da Overpass, salvate in cache) oppure un PDF caricato dall'utente (copiato nell'app, visibile offline).
+- Nella scheda del volo: gate cliccabile che apre la mappa, sezione "Da dove arriva l'aereo" (volo precedente della stessa matricola), con atterraggio, puntualità e margine di rotazione.
+- Globo: scelta Satellite / Mappa topografica, rotta reale in blu con bordo bianco, nessuna rotazione automatica.
+- Passport: ritardi in ore e minuti, classifica degli aeroporti con più ritardo alla partenza.
+- Il database si aggiorna senza perdere i voli.
 
 ## Novità della v0.3
 - Nuova identità grafica (carta d'imbarco / segnaletica aeroportuale): font Barlow Condensed, Barlow e IBM Plex Mono (licenza OFL), carta calda, blu notte e arancio segnale.

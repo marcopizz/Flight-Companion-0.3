@@ -51,7 +51,8 @@ data class Stats(
     val lostMinutes: Long,
     val avgDelayedMin: Int,
     val worstDelay: Flight?,
-    val airlineDelays: List<AirlineDelay>
+    val airlineDelays: List<AirlineDelay>,
+    val airportDelays: List<Pair<String, Long>>
 )
 
 fun yearOf(f: Flight): Int = f.dateLocal.take(4).toIntOrNull() ?: 0
@@ -135,6 +136,12 @@ object StatsCalc {
             }
             .sortedByDescending { it.minutes }
 
+        val airportDelays = fl
+            .filter { (it.delayDepMin ?: 0) > 0 && it.depIata != null }
+            .groupBy { "${it.depIata} – ${it.depCity ?: it.depName ?: ""}" }
+            .map { (k, list) -> k to list.sumOf { (it.delayDepMin ?: 0).toLong() } }
+            .sortedByDescending { it.second }
+
         return Stats(
             flights = fl.size,
             km = km,
@@ -174,7 +181,8 @@ object StatsCalc {
             lostMinutes = lost,
             avgDelayedMin = if (late.isEmpty()) 0 else (lost / late.size).toInt(),
             worstDelay = late.maxByOrNull { it.delayArrMin ?: 0 },
-            airlineDelays = airlineDelays
+            airlineDelays = airlineDelays,
+            airportDelays = airportDelays
         )
     }
 }

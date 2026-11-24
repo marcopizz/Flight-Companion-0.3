@@ -6,6 +6,7 @@ import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
@@ -71,6 +72,14 @@ interface AeroApi {
         @Query("dateLocalRole") role: String,
         @Query("withLocation") withLocation: Boolean,
         @Query("withAircraftImage") withImage: Boolean
+    ): Response<List<FlightDto>>
+
+    @GET("flights/reg/{reg}/{date}")
+    suspend fun flightsByReg(
+        @Path("reg") reg: String,
+        @Path("date") date: String,
+        @Query("dateLocalRole") role: String,
+        @Query("withLocation") withLocation: Boolean
     ): Response<List<FlightDto>>
 
     @GET("aircrafts/reg/{reg}")
@@ -165,6 +174,22 @@ interface OpenSkyAuthApi {
     ): Response<OsToken>
 }
 
+// ---------- Meteo aeronautico (NOAA Aviation Weather Center) e OpenStreetMap (Overpass) ----------
+
+interface AviationWeatherApi {
+    @GET("api/data/metar")
+    suspend fun metar(@Query("ids") ids: String, @Query("format") format: String): Response<JsonArray>
+
+    @GET("api/data/taf")
+    suspend fun taf(@Query("ids") ids: String, @Query("format") format: String): Response<JsonArray>
+}
+
+interface OverpassApi {
+    @FormUrlEncoded
+    @POST("api/interpreter")
+    suspend fun query(@Field("data") data: String): Response<JsonObject>
+}
+
 object Net {
     private val client: OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(Interceptor { chain ->
@@ -176,6 +201,8 @@ object Net {
                     .build()
                 Prefs.countCall()
                 chain.proceed(withKey)
+            } else if (req.url.host.contains("aviationweather") || req.url.host.contains("overpass")) {
+                chain.proceed(req.newBuilder().header("User-Agent", "FlightCompanion/0.4 (personal use)").build())
             } else if (req.url.host.contains("planespotters")) {
                 // Planespotters richiede una User-Agent che identifichi l'app
                 chain.proceed(req.newBuilder().header("User-Agent", "FlightCompanion/0.2 (personal use)").build())
@@ -200,4 +227,6 @@ object Net {
     val planespotters: PlanespottersApi by lazy { retrofit("https://api.planespotters.net/").create(PlanespottersApi::class.java) }
     val opensky: OpenSkyApi by lazy { retrofit("https://opensky-network.org/").create(OpenSkyApi::class.java) }
     val openskyAuth: OpenSkyAuthApi by lazy { retrofit("https://auth.opensky-network.org/").create(OpenSkyAuthApi::class.java) }
+    val wx: AviationWeatherApi by lazy { retrofit("https://aviationweather.gov/").create(AviationWeatherApi::class.java) }
+    val overpass: OverpassApi by lazy { retrofit("https://overpass-api.de/").create(OverpassApi::class.java) }
 }
